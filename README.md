@@ -1,5 +1,11 @@
 # Adios
 
+Source code for "Adios to Busy-Waiting for Microsecond-scale Memory Disaggregation (EuroSys'25)"
+
+Paper: https://yoon.ws/adios
+
+## Prerequisites
+
 * Install Ubuntu 20.04 LTS
 * Run all command as `root`. Login into `root` by `sudo su -`
 
