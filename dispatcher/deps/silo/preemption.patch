@@ -1,0 +1,164 @@
+From 97f77407d5b6cd789a7ab528bf12b8e073896831 Mon Sep 17 00:00:00 2001
+From: Josh Fried <joshuafried@gmail.com>
+Date: Wed, 22 Apr 2020 16:41:44 -0400
+Subject: [PATCH] preemption patches
+
+---
+ Makefile           |  2 ++
+ benchmarks/tpcc.cc |  2 +-
+ core.h             | 40 ++++++++++++++++++++++++++++++++++------
+ shenango.h         | 11 +++++++++++
+ ticker.h           | 13 ++++++++++++-
+ 5 files changed, 60 insertions(+), 8 deletions(-)
+ create mode 100644 shenango.h
+
+diff --git a/Makefile b/Makefile
+index 835abd5..8a837f0 100644
+--- a/Makefile
++++ b/Makefile
+@@ -235,6 +235,8 @@ masstree/configure masstree/config.h.in: masstree/configure.ac
+ .PHONY: dbtest
+ dbtest: $(O)/benchmarks/dbtest
+ 
++dbtestdep: $(O)/benchmarks/dbtest.o $(OBJFILES) $(MASSTREE_OBJFILES) $(BENCH_OBJFILES) third-party/lz4/liblz4.so
++
+ $(O)/benchmarks/dbtest: $(O)/benchmarks/dbtest.o $(OBJFILES) $(MASSTREE_OBJFILES) $(BENCH_OBJFILES) third-party/lz4/liblz4.so
+ 	$(CXX) -o $(O)/benchmarks/dbtest $^ $(BENCH_LDFLAGS) $(LZ4LDFLAGS)
+ 
+diff --git a/benchmarks/tpcc.cc b/benchmarks/tpcc.cc
+index 383ad37..01784c1 100644
+--- a/benchmarks/tpcc.cc
++++ b/benchmarks/tpcc.cc
+@@ -2093,7 +2093,7 @@ protected:
+    virtual bench_worker *
+    mkworker(unsigned int thread_hint)
+    {
+-    static std::atomic<int> workers;
++    static std::atomic<int> workers(1);
+     int wid = workers.fetch_add(1);
+     fast_random r(wid);
+     return new tpcc_worker(
+diff --git a/core.h b/core.h
+index 1750ee3..2454ee3 100644
+--- a/core.h
++++ b/core.h
+@@ -1,10 +1,23 @@
+ #pragma once
+ 
++// #undef assert
++// extern "C" {
++//   #define typeof(x) __typeof__(x) 
++//   #include <runtime/thread.h>
++//   #undef assert
++//   // #undef thread
++// }
++// #include <assert.h>
++
++
+ #include <atomic>
+ #include <sys/types.h>
+ #include "macros.h"
+ #include "util.h"
+ 
++
++#include "shenango.h"
++
+ /**
+  * XXX: CoreIDs are not recyclable for now, so NMAXCORES is really the number
+  * of threads which can ever be spawned in the system
+@@ -16,13 +29,23 @@ public:
+   static inline unsigned
+   core_id()
+   {
+-    if (unlikely(tl_core_id == -1)) {
++    int core;
++    void *self = thread_self();
++    if (self == 0)
++      core = tl_core_id;
++    else
++      core = get_uthread_specific();
++    if (unlikely(core == -1)) {
+       // initialize per-core data structures
+-      tl_core_id = g_core_count.fetch_add(1, std::memory_order_acq_rel);
++      core = g_core_count.fetch_add(1, std::memory_order_acq_rel);
+       // did we exceed max cores?
+-      ALWAYS_ASSERT(unsigned(tl_core_id) < NMaxCores);
++      ALWAYS_ASSERT(unsigned(core) < NMaxCores);
++      if (self == 0)
++        tl_core_id = core;
++      else
++        set_uthread_specific(core);
+     }
+-    return tl_core_id;
++    return core;
+   }
+ 
+   /**
+@@ -52,8 +75,13 @@ public:
+   {
+     ALWAYS_ASSERT(cid < NMaxCores);
+     ALWAYS_ASSERT(cid < g_core_count.load(std::memory_order_acquire));
+-    ALWAYS_ASSERT(tl_core_id == -1);
+-    tl_core_id = cid; // sigh
++
++    if (thread_self() == 0) {
++      ALWAYS_ASSERT(tl_core_id == -1);
++      tl_core_id = cid;
++    } else {
++      set_uthread_specific(cid);
++    }
+   }
+ 
+   // actual number of CPUs online for the system
+diff --git a/shenango.h b/shenango.h
+new file mode 100644
+index 0000000..d182200
+--- /dev/null
++++ b/shenango.h
+@@ -0,0 +1,11 @@
++#pragma once
++
++extern "C" {
++
++extern void shenango_preempt_disable(void);
++extern void shenango_preempt_enable(void);
++extern void *thread_self(void);
++extern uint64_t get_uthread_specific(void);
++extern void set_uthread_specific(uint64_t val);
++
++}
+diff --git a/ticker.h b/ticker.h
+index f8d2c10..0d29084 100644
+--- a/ticker.h
++++ b/ticker.h
+@@ -9,6 +9,8 @@
+ #include "spinlock.h"
+ #include "lockguard.h"
+ 
++#include "shenango.h"
++
+ class ticker {
+ public:
+ 
+@@ -217,8 +219,17 @@ private:
+                   thread_cur_tick == cur_tick);
+         if (thread_cur_tick == cur_tick)
+           continue;
+-        lock_guard<spinlock> lg(ti.lock_);
++        shenango_preempt_disable();
++        while (!ti.lock_.try_lock()) {
++          shenango_preempt_enable();
++          struct timespec t1 = {0};
++          t1.tv_nsec = tick_us * 1000;
++          nanosleep(&t1, nullptr);
++          shenango_preempt_disable();
++        }
+         ti.current_tick_.store(cur_tick, std::memory_order_release);
++        ti.lock_.unlock();
++        shenango_preempt_enable();
+       }
+ 
+       last_tick_inclusive_.store(last_tick, std::memory_order_release);
+-- 
+2.17.1
+

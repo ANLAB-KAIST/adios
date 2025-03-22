@@ -1,0 +1,7 @@
+#pragma once
+
+#cmakedefine PROTOCOL_MEASURE
+#cmakedefine PROTOCOL_BREAKDOWN
+
+#cmakedefine ENABLE_SILO
+#cmakedefine ENABLE_FAISS

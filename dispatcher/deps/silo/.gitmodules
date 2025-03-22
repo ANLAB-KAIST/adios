@@ -1,0 +1,4 @@
+[submodule "silo"]
+	path = silo
+	url = https://github.com/shenango/silodb.git
+	ignore = dirty

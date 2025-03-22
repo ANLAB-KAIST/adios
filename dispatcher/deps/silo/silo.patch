@@ -1,0 +1,97 @@
+From bd6d721f88e932928382a7ac79efac0abd5e8eab Mon Sep 17 00:00:00 2001
+From: Josh Fried <joshuafried@gmail.com>
+Date: Mon, 20 Apr 2020 14:17:55 -0400
+Subject: [PATCH] tweaks for shenango
+
+---
+ Makefile           |  3 ++-
+ allocator.cc       |  1 +
+ benchmarks/tpcc.cc | 15 ++++++++++++++-
+ ticker.h           | 12 ++++++------
+ 4 files changed, 23 insertions(+), 8 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index b932a98..25a9cb3 100644
+--- a/Makefile
++++ b/Makefile
+@@ -76,7 +76,8 @@ else
+ 	$(error invalid mode)
+ endif
+ 
+-CXXFLAGS := -g -Wall -std=c++0x -Wno-maybe-uninitialized
++CXXFLAGS := -g -Wall -std=c++0x -Wno-format-truncation -Wno-maybe-uninitialized -Wno-unused-variable
++CXXFLAGS += -Wno-address-of-packed-member -Wno-class-memaccess
+ CXXFLAGS += -MD -Ithird-party/lz4 -DCONFIG_H=\"$(CONFIG_H)\"
+ 
+ ifeq ($(INSTR),1)
+diff --git a/allocator.cc b/allocator.cc
+index d3d16f4..517fe89 100644
+--- a/allocator.cc
++++ b/allocator.cc
+@@ -310,6 +310,7 @@ allocator::ReleaseArenas(void **arenas)
+ static void
+ numa_hint_memory_placement(void *px, size_t sz, unsigned node)
+ {
++  return;
+   struct bitmask *bm = numa_allocate_nodemask();
+   numa_bitmask_setbit(bm, node);
+   numa_interleave_memory(px, sz, bm);
+diff --git a/benchmarks/tpcc.cc b/benchmarks/tpcc.cc
+index 7619c4a..383ad37 100644
+--- a/benchmarks/tpcc.cc
++++ b/benchmarks/tpcc.cc
+@@ -148,7 +148,7 @@ static int g_new_order_remote_item_pct = 1;
+ static int g_new_order_fast_id_gen = 0;
+ static int g_uniform_item_dist = 0;
+ static int g_order_status_scan_hack = 0;
+-static unsigned g_txn_workload_mix[] = { 45, 43, 4, 4, 4 }; // default TPC-C workload mix
++unsigned g_txn_workload_mix[] = { 45, 43, 4, 4, 4 }; // default TPC-C workload mix
+ 
+ static aligned_padded_elem<spinlock> *g_partition_locks = nullptr;
+ static aligned_padded_elem<atomic<uint64_t>> *g_district_ids = nullptr;
+@@ -2090,6 +2090,19 @@ protected:
+     return ret;
+   }
+ 
++   virtual bench_worker *
++   mkworker(unsigned int thread_hint)
++   {
++    static std::atomic<int> workers;
++    int wid = workers.fetch_add(1);
++    fast_random r(wid);
++    return new tpcc_worker(
++              wid,
++              r.next(), db, open_tables, partitions,
++              &barrier_a, &barrier_b,
++              (thread_hint % NumWarehouses()) + 1, (thread_hint % NumWarehouses()) + 2);
++   }
++
+   virtual vector<bench_worker *>
+   make_workers()
+   {
+diff --git a/ticker.h b/ticker.h
+index e7ba19b..f8d2c10 100644
+--- a/ticker.h
++++ b/ticker.h
+@@ -181,12 +181,12 @@ private:
+   tickerloop()
+   {
+     // allow the ticker to run anywhere
+-    cpu_set_t mask;
+-    CPU_ZERO(&mask);
+-    for (int i=0;i<CPU_SETSIZE;i++)
+-      CPU_SET(i,&mask);
+-    int ret = sched_setaffinity(0, sizeof(mask), &mask);
+-    ALWAYS_ASSERT(!ret);
++    // cpu_set_t mask;
++    // CPU_ZERO(&mask);
++    // for (int i=0;i<CPU_SETSIZE;i++)
++    //   CPU_SET(i,&mask);
++    // int ret = sched_setaffinity(0, sizeof(mask), &mask);
++    // ALWAYS_ASSERT(!ret);
+ 
+     // runs as daemon
+     util::timer loop_timer;
+-- 
+2.25.1
+
