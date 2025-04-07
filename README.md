@@ -17,8 +17,8 @@ cd /opt
 git clone https://github.com/ANLAB-KAIST/adios.git
 cd adios
 
-./launch.sh install # install dependencies
-./launch.sh install-deps # install ofed
+./launch.sh install-deps # install dependencies
+./launch.sh install-ofed # install ofed
 
 reboot
 
