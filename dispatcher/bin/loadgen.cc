@@ -30,8 +30,6 @@ static struct ibv_pd *pd;
 
 static std::unique_ptr<fvecs_mmap> bigann_query;
 
-#define RANDOM_SEED 100
-
 struct arg_config_t {
     ARG_STR_DEFAULT(out_path, "/tmp", "result out path");
     ARG_STR(dev_name, "IB device name. Example: mlx5_0");
